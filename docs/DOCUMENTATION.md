@@ -7,6 +7,7 @@ This document is the single source of truth for locating and maintaining all wri
 | Artifact | Purpose | Maintenance Rules |
 | --- | --- | --- |
 | [`docs/zielbild/spec.md`](zielbild/spec.md) | Canonical specification for Hemera OneirOS (zkVM) v1.1. | Never edit without updating the changelog and runbook checkpoints. Treat as source-of-truth for product and engineering requirements. |
+| [`docs/architecture/overview.md`](architecture/overview.md) | Mapping between the spec and the implementation skeleton. | Update when module responsibilities or configuration defaults shift. |
 | [`../runbook.md`](../runbook.md) | Workflow rules and compliance checklist. | Review before each change; update when process expectations evolve. |
 | [`../fileandwiremap.md`](../fileandwiremap.md) | Repository structure, ownership, and integration map. | Keep aligned with actual file layout and integration surfaces. |
 | [`../changelog.md`](../changelog.md) | Chronological log of meaningful updates. | Append an entry for every merged change affecting docs, specs, or implementation. |
@@ -20,7 +21,7 @@ This document is the single source of truth for locating and maintaining all wri
 
 ## Future Enhancements
 
-* Populate implementation-specific guides (runtime, frontends, proving backends) linked from this hub.
+* Populate implementation-specific guides (runtime, frontends, proving backends) linked from this hub. **Status:** Initial implementation overview and module READMEs added under `oneiros/`.
 * Automate validation that documentation references remain up to date (pre-commit or CI).
 * Extend the file-and-wire map with component owners and service-level objectives.
 

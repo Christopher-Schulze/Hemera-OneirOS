@@ -1,0 +1,28 @@
+# Default OneirOS profile derived from docs/zielbild/spec.md
+oneiros:
+  profile: continuations
+  isa: rv32im
+  isa_mode: per_instruction_air
+  zero_knowledge: true
+  ivc_backend: hypernova
+  recursion_curve: pasta
+  memory_model: sparse_merkle_twist
+  page_size: 4096
+  max_cycles_per_segment: 1048576
+  transcript: poseidon2_v2
+  security_bits: 128
+  lookup_backend: lasso_decomposable
+  hardware_backend: auto
+
+proving:
+  ldt: deepfri
+  stark_field: m31
+  pcs: deepfold
+  folding: protogalaxy_optional
+
+injector:
+  wrapper: groth16
+  primary_curve: bls12_381
+  fallback_curve: bn254
+  aggregation: snarkpack_cp_snark
+  blob_binding: eip4844_kzg
