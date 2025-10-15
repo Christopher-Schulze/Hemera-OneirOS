@@ -13,6 +13,13 @@ from .configuration import (
     parse_overrides,
     profile_metadata,
 )
+from .core.trace import (
+    ChipType,
+    MemoryAccess,
+    MemoryAccessType,
+    TraceBundle,
+    TraceBuilder,
+)
 
 __all__ = [
     "AppConfig",
@@ -26,4 +33,9 @@ __all__ = [
     "load_config",
     "parse_overrides",
     "profile_metadata",
+    "ChipType",
+    "MemoryAccess",
+    "MemoryAccessType",
+    "TraceBundle",
+    "TraceBuilder",
 ]
