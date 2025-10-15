@@ -29,7 +29,7 @@ import hashlib
 import random
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, Iterable, Iterator, List, Mapping, MutableMapping, Tuple
+from typing import Dict, Iterable, Iterator, List, Mapping, MutableMapping, Sequence, Tuple
 
 
 # ---------------------------------------------------------------------------
@@ -67,6 +67,28 @@ class SparseProof:
             "page_commitment": self.page_commitment,
             "witness_digest": self.witness_digest,
         }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, object]) -> "SparseProof":
+        try:
+            page_commitment = str(data["page_commitment"])
+            witness_digest = str(data["witness_digest"])
+        except KeyError as exc:  # pragma: no cover - defensive guard
+            raise ValueError("sparse proof mapping missing required keys") from exc
+        return cls(page_commitment=page_commitment, witness_digest=witness_digest)
+
+
+def _optional_int(value: object) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ValueError("boolean value is not a valid integer")
+    if isinstance(value, (int, float)) and int(value) == value:
+        return int(value)
+    if isinstance(value, str) and value.strip():
+        cleaned = value.replace("_", "")
+        return int(cleaned, 10)
+    raise ValueError(f"invalid optional integer value: {value!r}")
 
 
 @dataclass(frozen=True)
@@ -122,6 +144,30 @@ class CPUTraceRow:
             "zk_blind": self.zk_blind,
         }
 
+    @classmethod
+    def from_dict(cls, data: Mapping[str, object]) -> "CPUTraceRow":
+        try:
+            chip = ChipType(str(data["air_chip"]))
+        except KeyError as exc:  # pragma: no cover - defensive guard
+            raise ValueError("cpu trace mapping missing 'air_chip'") from exc
+        return cls(
+            cycle=int(data.get("cycle", 0)),
+            pc=int(data.get("pc", 0)),
+            instr=str(data.get("instr", "")),
+            air_chip=chip,
+            rd=_optional_int(data.get("rd")),
+            rs1=_optional_int(data.get("rs1")),
+            rs2=_optional_int(data.get("rs2")),
+            imm=int(data.get("imm", 0)),
+            result=int(data.get("result", 0)),
+            next_pc=int(data.get("next_pc", 0)),
+            registers_delta=tuple(
+                (int(reg), int(val)) for reg, val in data.get("registers_delta", [])
+            ),
+            flags=int(data.get("flags", 0)),
+            zk_blind=int(data.get("zk_blind", 0)),
+        )
+
 
 @dataclass(frozen=True)
 class MemTraceRow:
@@ -152,6 +198,29 @@ class MemTraceRow:
             "cow": self.cow,
         }
 
+    @classmethod
+    def from_dict(cls, data: Mapping[str, object]) -> "MemTraceRow":
+        try:
+            acc = MemoryAccessType(str(data["acc"]))
+        except KeyError as exc:  # pragma: no cover - defensive guard
+            raise ValueError("memory trace mapping missing 'acc'") from exc
+        sparse = data.get("sparse_proof", {})
+        if not isinstance(sparse, Mapping):  # pragma: no cover - defensive guard
+            raise ValueError("sparse_proof must be a mapping")
+        proof = SparseProof.from_dict(sparse)
+        return cls(
+            cycle=int(data.get("cycle", 0)),
+            addr=int(data.get("addr", 0)),
+            page_id=int(data.get("page_id", 0)),
+            page_off=int(data.get("page_off", 0)),
+            acc=acc,
+            val=int(data.get("val", 0)),
+            sparse_proof=proof,
+            old_root=str(data.get("old_root", "")),
+            new_root=str(data.get("new_root", "")),
+            cow=bool(data.get("cow", False)),
+        )
+
 
 @dataclass(frozen=True)
 class TraceBundle:
@@ -165,6 +234,52 @@ class TraceBundle:
             "cpu": [row.to_dict() for row in self.cpu],
             "memory": [row.to_dict() for row in self.memory],
         }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, object]) -> "TraceBundle":
+        cpu_rows = data.get("cpu", [])
+        mem_rows = data.get("memory", [])
+        if not isinstance(cpu_rows, Sequence) or not isinstance(mem_rows, Sequence):
+            raise ValueError("Trace bundle data must contain sequence entries for cpu/memory")
+        cpu = tuple(
+            row if isinstance(row, CPUTraceRow) else CPUTraceRow.from_dict(row)
+            for row in cpu_rows
+        )
+        memory = tuple(
+            row if isinstance(row, MemTraceRow) else MemTraceRow.from_dict(row)
+            for row in mem_rows
+        )
+        return cls(cpu=cpu, memory=memory)
+
+
+@dataclass(frozen=True)
+class TraceState:
+    """Snapshot of the builder state at a given cycle."""
+
+    cycle: int
+    pc: int
+    registers: Tuple[Tuple[int, int], ...]
+    memory_root: str
+
+    def to_dict(self) -> Dict[str, object]:
+        return {
+            "cycle": self.cycle,
+            "pc": self.pc,
+            "registers": list(self.registers),
+            "memory_root": self.memory_root,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, object]) -> "TraceState":
+        registers = tuple(
+            (int(reg), int(val)) for reg, val in data.get("registers", [])
+        )
+        return cls(
+            cycle=int(data.get("cycle", 0)),
+            pc=int(data.get("pc", 0)),
+            registers=registers,
+            memory_root=str(data.get("memory_root", "")),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -265,6 +380,14 @@ class SparseMemoryImage:
         hasher.update(data)
         return hasher.hexdigest()
 
+    def clone(self) -> "SparseMemoryImage":
+        """Return a deep copy of the memory image."""
+
+        clone = SparseMemoryImage(page_size=self.page_size)
+        clone._pages = {page_id: bytearray(page) for page_id, page in self._pages.items()}
+        clone._dirty_pages = set(self._dirty_pages)
+        return clone
+
 
 # ---------------------------------------------------------------------------
 #  Instruction classification
@@ -360,12 +483,16 @@ class TraceBuilder:
         zero_knowledge: bool = True,
         initial_pc: int = 0,
         rng_seed: int | None = None,
+        initial_registers: Mapping[int, int] | None = None,
     ) -> None:
         self.page_size = page_size
         self.zero_knowledge = zero_knowledge
         self._pc = initial_pc
         self._cycle = 0
         self._registers: MutableMapping[int, int] = {i: 0 for i in range(32)}
+        if initial_registers:
+            for reg, value in initial_registers.items():
+                self.set_register(reg, value)
         self._cpu_rows: List[CPUTraceRow] = []
         self._mem_rows: List[MemTraceRow] = []
         self._memory = SparseMemoryImage(page_size=page_size)
@@ -381,6 +508,54 @@ class TraceBuilder:
         if not mnemonic:
             raise ValueError("mnemonic must not be empty")
         self._instruction_map[mnemonic.strip().lower()] = chip
+
+    def set_register(self, register: int, value: int) -> None:
+        """Set the value for ``register`` in the builder state."""
+
+        self._validate_register_index(register)
+        self._registers[register] = int(value)
+
+    def load_memory(self, address: int, data: bytes | bytearray) -> None:
+        """Preload ``data`` into memory without emitting trace rows."""
+
+        if address < 0:
+            raise ValueError("address must be non-negative")
+        if not data:
+            raise ValueError("data payload must not be empty")
+        if not isinstance(data, (bytes, bytearray)):
+            raise TypeError("data must be bytes-like")
+        self._memory.write(address, bytes(data))
+        self._current_root = self._memory.root()
+
+    def snapshot_state(self) -> TraceState:
+        """Return a snapshot of the current builder state."""
+
+        registers = tuple(sorted(self._registers.items()))
+        return TraceState(
+            cycle=self._cycle,
+            pc=self._pc,
+            registers=registers,
+            memory_root=self._current_root,
+        )
+
+    def fork(self) -> "TraceBuilder":
+        """Create an independent clone of the builder including trace rows."""
+
+        clone = TraceBuilder(
+            page_size=self.page_size,
+            zero_knowledge=self.zero_knowledge,
+            initial_pc=self._pc,
+            rng_seed=0,
+        )
+        clone._cycle = self._cycle
+        clone._registers = dict(self._registers)
+        clone._cpu_rows = list(self._cpu_rows)
+        clone._mem_rows = list(self._mem_rows)
+        clone._memory = self._memory.clone()
+        clone._instruction_map = dict(self._instruction_map)
+        clone._current_root = self._current_root
+        clone._rng.setstate(self._rng.getstate())
+        return clone
 
     def classify_instruction(self, mnemonic: str) -> ChipType:
         key = mnemonic.strip().lower()
@@ -412,8 +587,7 @@ class TraceBuilder:
 
         registers_delta: List[Tuple[int, int]] = []
         if rd is not None and result is not None:
-            if not 0 <= rd < 32:
-                raise ValueError("rd out of range")
+            self._validate_register_index(rd)
             if self._registers.get(rd) != result:
                 self._registers[rd] = result
                 registers_delta.append((rd, result))
@@ -458,6 +632,10 @@ class TraceBuilder:
             return 0
         # Use a 252-bit field-sized random for stability across runs.
         return self._rng.getrandbits(252)
+
+    def _validate_register_index(self, register: int) -> None:
+        if not 0 <= register < 32:
+            raise ValueError("register index must be between 0 and 31")
 
     def _process_memory_access(self, access: MemoryAccess, cycle: int) -> MemTraceRow:
         address = access.address
@@ -514,6 +692,7 @@ __all__ = [
     "CPUTraceRow",
     "MemTraceRow",
     "TraceBundle",
+    "TraceState",
     "TraceBuilder",
 ]
 

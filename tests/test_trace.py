@@ -8,7 +8,9 @@ from oneiros.core.trace import (
     ChipType,
     MemoryAccess,
     MemoryAccessType,
+    TraceBundle,
     TraceBuilder,
+    TraceState,
 )
 
 
@@ -88,4 +90,47 @@ def test_unknown_instruction_raises():
     builder = TraceBuilder()
     with pytest.raises(ValueError):
         builder.emit_instruction("not_a_real_instr")
+
+
+def test_trace_builder_snapshot_and_memory_preload():
+    builder = TraceBuilder(rng_seed=99, initial_registers={5: 1337})
+    builder.load_memory(0x2000, b"\xAA\xBB\xCC\xDD")
+    snapshot = builder.snapshot_state()
+    assert isinstance(snapshot, TraceState)
+    assert snapshot.pc == 0
+    registers = dict(snapshot.registers)
+    assert registers[5] == 1337
+    assert len(snapshot.memory_root) == 64
+
+    builder.emit_instruction("addi", rd=5, rs1=0, imm=1, result=1338)
+    second_snapshot = builder.snapshot_state()
+    assert second_snapshot.memory_root == snapshot.memory_root
+    bundle = builder.export()
+    assert bundle.cpu[-1].result == 1338
+    assert len(bundle.memory) == 0
+
+
+def test_trace_builder_fork_and_rng_alignment():
+    builder = TraceBuilder(rng_seed=7)
+    builder.emit_instruction("addi", rd=1, rs1=0, imm=5, result=5)
+    clone = builder.fork()
+
+    builder.emit_instruction("addi", rd=3, rs1=0, imm=2, result=2)
+    clone.emit_instruction("addi", rd=3, rs1=0, imm=2, result=2)
+
+    orig_last = builder.export().cpu[-1]
+    clone_last = clone.export().cpu[-1]
+    assert orig_last.zk_blind == clone_last.zk_blind
+
+    clone.emit_instruction("addi", rd=4, rs1=0, imm=1, result=1)
+    assert len(clone.export().cpu) == len(builder.export().cpu) + 1
+
+
+def test_trace_bundle_roundtrip_from_dict():
+    builder = TraceBuilder(rng_seed=1)
+    builder.emit_instruction("addi", rd=1, result=1)
+    bundle = builder.export()
+    payload = bundle.to_dict()
+    reconstructed = TraceBundle.from_dict(payload)
+    assert reconstructed == bundle
 
