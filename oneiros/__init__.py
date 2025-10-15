@@ -20,6 +20,19 @@ from .core.trace import (
     TraceBundle,
     TraceBuilder,
 )
+from .core.scheduler import (
+    AggregatorWindow,
+    IdleWindow,
+    ProverSchedule,
+    ProverStats,
+    ScheduleAnalytics,
+    ScheduleSummary,
+    ScheduleTimeline,
+    SegmentSchedule,
+    TimelineEvent,
+    build_schedule,
+    build_schedule_from_plan,
+)
 
 __all__ = [
     "AppConfig",
@@ -38,4 +51,15 @@ __all__ = [
     "MemoryAccessType",
     "TraceBundle",
     "TraceBuilder",
+    "AggregatorWindow",
+    "IdleWindow",
+    "ProverSchedule",
+    "ProverStats",
+    "ScheduleAnalytics",
+    "ScheduleSummary",
+    "ScheduleTimeline",
+    "SegmentSchedule",
+    "TimelineEvent",
+    "build_schedule",
+    "build_schedule_from_plan",
 ]

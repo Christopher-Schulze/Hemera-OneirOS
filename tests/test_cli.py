@@ -130,3 +130,48 @@ def test_cli_plan_with_throughput_override(capsys: pytest.CaptureFixture[str]) -
 def test_cli_plan_invalid_throughput() -> None:
     with pytest.raises(SystemExit):
         main(["--plan", "--hardware-throughput", "badvalue"])
+
+
+def test_cli_schedule_from_profile(capsys: pytest.CaptureFixture[str]) -> None:
+    exit_code = main(
+        [
+            "--profile",
+            "continuations",
+            "--schedule",
+            "--workload-cycles",
+            "80000",
+            "--format",
+            "human",
+        ]
+    )
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "Per-segment assignments" in output
+    assert "Aggregator:" in output
+    assert "Analytics:" in output
+    assert "Timeline resources:" in output
+
+
+def test_cli_schedule_json(capsys: pytest.CaptureFixture[str]) -> None:
+    exit_code = main(
+        [
+            "--profile",
+            "standard",
+            "--schedule",
+            "--hardware-throughput",
+            "1.5Mc/s",
+            "--format",
+            "json",
+        ]
+    )
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "\"segments\"" in output
+    assert "\"summary\"" in output
+    assert "\"analytics\"" in output
+    assert "\"timeline\"" in output
+
+
+def test_cli_schedule_plan_mutually_exclusive() -> None:
+    with pytest.raises(SystemExit):
+        main(["--profile", "standard", "--plan", "--schedule"])

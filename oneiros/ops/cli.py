@@ -19,6 +19,7 @@ from ..configuration import (
     parse_overrides,
 )
 from ..core.planner import ExecutionPlan, build_execution_plan
+from ..core.scheduler import ProverSchedule, build_schedule
 
 DEFAULT_CONFIG_PATH = Path("configs/oneiros.default.yaml")
 
@@ -61,6 +62,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Emit a derived execution plan instead of the raw configuration",
     )
     parser.add_argument(
+        "--schedule",
+        action="store_true",
+        help="Emit a prover/aggregator schedule derived from the configuration",
+    )
+    parser.add_argument(
         "--workload-cycles",
         type=str,
         help="Override the assumed workload cycles when generating a plan",
@@ -92,6 +98,14 @@ def format_plan(plan: ExecutionPlan, output_format: str) -> str:
     if output_format == "yaml":
         return yaml.safe_dump(plan.to_dict(), sort_keys=False)
     return _format_plan_human(plan)
+
+
+def format_schedule(schedule: ProverSchedule, output_format: str) -> str:
+    if output_format == "json":
+        return json.dumps(schedule.to_dict(), indent=2, sort_keys=True)
+    if output_format == "yaml":
+        return yaml.safe_dump(schedule.to_dict(), sort_keys=False)
+    return _format_schedule_human(schedule)
 
 
 def _format_human(config: AppConfig) -> str:
@@ -146,6 +160,67 @@ def _format_plan_human(plan: ExecutionPlan) -> str:
     return "\n".join(lines)
 
 
+def _format_schedule_human(schedule: ProverSchedule) -> str:
+    lines: List[str] = []
+    lines.append(f"Execution profile: {schedule.plan.profile.value}")
+    lines.append(f"Concurrency: {schedule.plan.concurrency}")
+    lines.append(
+        "Total duration (s): "
+        f"{schedule.summary.total_duration_seconds:.2f}"
+    )
+    lines.append(f"Segments: {len(schedule.segments)}")
+    lines.append("Per-segment assignments:")
+    for segment in schedule.segments:
+        lines.append(
+            "  "
+            f"#{segment.index:02d} prover={segment.prover} cycles={segment.cycles} "
+            f"start={segment.start_time_seconds:.2f}s "
+            f"end={segment.end_time_seconds:.2f}s"
+        )
+    lines.append("Prover utilisation:")
+    for stat in schedule.summary.prover_stats:
+        lines.append(
+            "  "
+            f"prover {stat.prover}: segments={stat.segments}, busy={stat.busy_time_seconds:.2f}s, "
+            f"utilisation={stat.utilisation:.2%}, idle={stat.idle_time_seconds:.2f}s"
+        )
+        if stat.idle_windows:
+            lines.append("    idle windows:")
+            for window in stat.idle_windows:
+                lines.append(
+                    "      "
+                    f"start={window.start_time_seconds:.2f}s end={window.end_time_seconds:.2f}s "
+                    f"duration={window.duration_seconds:.2f}s"
+                )
+    aggregator = schedule.summary.aggregator
+    lines.append("Aggregator:")
+    lines.append(f"  start (s): {aggregator.start_time_seconds:.2f}")
+    lines.append(f"  end (s): {aggregator.end_time_seconds:.2f}")
+    lines.append(f"  latency (s): {aggregator.latency_seconds:.2f}")
+    lines.append(f"  segments: {aggregator.segments}")
+    analytics = schedule.summary.analytics
+    lines.append("Analytics:")
+    lines.append(f"  peak concurrency: {analytics.peak_concurrency}")
+    lines.append(f"  average concurrency: {analytics.average_concurrency:.2f}")
+    lines.append(f"  busy time (s): {analytics.busy_time_seconds:.2f}")
+    lines.append(f"  idle time (s): {analytics.idle_time_seconds:.2f}")
+    lines.append(
+        "  effective throughput (cycles/s): "
+        f"{analytics.effective_throughput_cycles_per_second:.2f}"
+    )
+    resources = schedule.timeline.resources
+    if resources:
+        lines.append("Timeline resources:")
+        for resource in resources:
+            events = schedule.timeline.filter(resource=resource)
+            total = sum(event.duration_seconds for event in events)
+            lines.append(
+                "  "
+                f"{resource}: events={len(events)}, total duration={total:.2f}s"
+            )
+    return "\n".join(lines)
+
+
 def main(argv: Iterable[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
@@ -175,7 +250,10 @@ def main(argv: Iterable[str] | None = None) -> int:
     if args.validate_only:
         return 0
 
-    if args.plan:
+    if args.plan or args.schedule:
+        if args.plan and args.schedule:
+            parser.error("--plan and --schedule are mutually exclusive")
+            return 2
         try:
             workload_cycles = _parse_int_argument(args.workload_cycles, "workload-cycles")
             working_set = _parse_size_argument(args.working_set) if args.working_set else None
@@ -188,16 +266,27 @@ def main(argv: Iterable[str] | None = None) -> int:
             parser.error(str(exc))
             return 2
         try:
-            plan = build_execution_plan(
-                config,
-                workload_cycles=workload_cycles,
-                working_set_bytes=working_set,
-                hardware_throughput=throughput_override,
-            )
+            if args.schedule:
+                schedule = build_schedule(
+                    config,
+                    workload_cycles=workload_cycles,
+                    working_set_bytes=working_set,
+                    hardware_throughput=throughput_override,
+                )
+            else:
+                plan = build_execution_plan(
+                    config,
+                    workload_cycles=workload_cycles,
+                    working_set_bytes=working_set,
+                    hardware_throughput=throughput_override,
+                )
         except Exception as exc:  # pragma: no cover - surfaced to CLI
             parser.error(str(exc))
             return 2
-        print(format_plan(plan, args.format))
+        if args.schedule:
+            print(format_schedule(schedule, args.format))
+        else:
+            print(format_plan(plan, args.format))
         return 0
 
     print(format_config(config, args.format))
