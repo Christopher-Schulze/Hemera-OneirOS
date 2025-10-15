@@ -70,6 +70,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         help="Override the assumed working set (e.g. 64MiB) when generating a plan",
     )
+    parser.add_argument(
+        "--hardware-throughput",
+        type=str,
+        help="Override the throughput estimate (e.g. 1.2Gc/s)",
+    )
     return parser
 
 
@@ -123,6 +128,41 @@ def _format_plan_human(plan: ExecutionPlan) -> str:
     lines.append(f"  ivc: {plan.ivc_backend}")
     lines.append(f"  lookup: {plan.lookup_backend}")
     lines.append(f"  hardware: {plan.hardware_backend}")
+    lines.append("Resources:")
+    lines.append(
+        "  throughput (cycles/s): "
+        f"{int(plan.resources.throughput_cycles_per_second)}"
+    )
+    lines.append(
+        "  proving time (s): "
+        f"{plan.resources.estimated_proving_time_seconds:.2f}"
+    )
+    lines.append(
+        "  aggregator latency (s): "
+        f"{plan.resources.aggregator_latency_seconds:.2f}"
+    )
+    lines.append(f"  proof size (bytes): {plan.resources.proof_size_bytes}")
+    lines.append(f"  peak memory (bytes): {plan.resources.peak_memory_bytes}")
+    lines.append(f"  energy (kWh): {plan.resources.estimated_energy_kwh:.2f}")
+    lines.append(f"  energy cost (USD): {plan.resources.estimated_energy_cost_usd:.2f}")
+    lines.append(f"  hardware occupancy (hours): {plan.resources.hardware_occupancy_hours:.2f}")
+    lines.append("Timeline:")
+    lines.append(f"  setup (s): {plan.timeline.setup_seconds:.2f}")
+    lines.append(f"  proving (s): {plan.timeline.proving_seconds:.2f}")
+    lines.append(f"  aggregation (s): {plan.timeline.aggregation_seconds:.2f}")
+    lines.append(f"  total (s): {plan.timeline.total_seconds:.2f}")
+    lines.append(
+        "  amortized per segment (s): "
+        f"{plan.timeline.amortized_seconds_per_segment:.4f}"
+    )
+    lines.append("Diagnostics:")
+    lines.append(f"  bottleneck: {plan.diagnostics.bottleneck}")
+    lines.append(f"  utilization score: {plan.diagnostics.utilization_score:.3f}")
+    lines.append(f"  scaling efficiency: {plan.diagnostics.scaling_efficiency:.3f}")
+    if plan.diagnostics.notes:
+        lines.append("  notes:")
+        for note in plan.diagnostics.notes:
+            lines.append(f"    - {note}")
     return "\n".join(lines)
 
 
@@ -159,6 +199,11 @@ def main(argv: Iterable[str] | None = None) -> int:
         try:
             workload_cycles = _parse_int_argument(args.workload_cycles, "workload-cycles")
             working_set = _parse_size_argument(args.working_set) if args.working_set else None
+            throughput_override = (
+                _parse_throughput_argument(args.hardware_throughput)
+                if args.hardware_throughput
+                else None
+            )
         except ValueError as exc:
             parser.error(str(exc))
             return 2
@@ -167,6 +212,7 @@ def main(argv: Iterable[str] | None = None) -> int:
                 config,
                 workload_cycles=workload_cycles,
                 working_set_bytes=working_set,
+                hardware_throughput=throughput_override,
             )
         except Exception as exc:  # pragma: no cover - surfaced to CLI
             parser.error(str(exc))
@@ -225,6 +271,46 @@ def _parse_size_argument(value: str) -> int:
     if bytes_value <= 0:
         raise ValueError("Working set must be positive")
     return bytes_value
+
+
+_THROUGHPUT_UNITS = {
+    "": 1.0,
+    "c/s": 1.0,
+    "cycles/s": 1.0,
+    "hz": 1.0,
+    "khz": 1_000.0,
+    "kc/s": 1_000.0,
+    "mhz": 1_000_000.0,
+    "mc/s": 1_000_000.0,
+    "ghz": 1_000_000_000.0,
+    "gc/s": 1_000_000_000.0,
+}
+
+
+def _parse_throughput_argument(value: str | None) -> float | None:
+    if value is None:
+        return None
+    cleaned = value.strip().lower().replace("_", "")
+    if not cleaned:
+        raise ValueError("--hardware-throughput must not be empty")
+
+    match = re.fullmatch(r"([0-9]+(?:\.[0-9]+)?)\s*([a-z/]+)?", cleaned)
+    if not match:
+        raise ValueError(f"Invalid throughput format: {value}")
+
+    number, unit = match.groups()
+    unit = unit or ""
+    if unit not in _THROUGHPUT_UNITS:
+        raise ValueError(f"Unknown throughput unit '{unit}'")
+
+    numeric = float(number)
+    if math.isinf(numeric) or math.isnan(numeric):  # pragma: no cover - defensive
+        raise ValueError(f"Invalid numeric value for throughput: {value}")
+
+    throughput = numeric * _THROUGHPUT_UNITS[unit]
+    if throughput <= 0:
+        raise ValueError("Throughput override must be positive")
+    return throughput
 
 
 def _print_profiles() -> None:

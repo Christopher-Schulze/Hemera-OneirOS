@@ -23,4 +23,4 @@ core/
 1. Define crate boundaries (`oneiros-core` Rust crate) and shared traits for chips.
 2. Scaffold golden test harness with deterministic fixtures.
 3. Integrate with proving layer once trace commitments are finalized.
-4. Feed execution planner heuristics (`oneiros/core/planner.py`) with real trace metrics to replace the current metadata-derived estimates.
+4. Feed execution planner heuristics (`oneiros/core/planner.py`) with real trace metrics to refine the metadata-derived resource estimates for throughput, proof sizes, compression latency, energy consumption, and timeline diagnostics.

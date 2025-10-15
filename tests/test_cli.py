@@ -85,6 +85,9 @@ def test_cli_plan_from_profile(capsys: pytest.CaptureFixture[str]) -> None:
     output = capsys.readouterr().out
     assert "total_cycles: 100000" in output
     assert "working_set_bytes" in output
+    assert "resources" in output
+    assert "timeline" in output
+    assert "diagnostics" in output
 
 
 def test_cli_plan_from_file(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -101,8 +104,34 @@ def test_cli_plan_from_file(tmp_path: Path, capsys: pytest.CaptureFixture[str]) 
     assert exit_code == 0
     output = capsys.readouterr().out
     assert "\"profile\": \"continuations\"" in output
+    assert "resources" in output
+    assert "timeline" in output
+    assert "diagnostics" in output
 
 
 def test_cli_plan_invalid_working_set() -> None:
     with pytest.raises(SystemExit):
         main(["--plan", "--working-set", "nonsense"])
+
+
+def test_cli_plan_with_throughput_override(capsys: pytest.CaptureFixture[str]) -> None:
+    exit_code = main(
+        [
+            "--profile",
+            "standard",
+            "--plan",
+            "--hardware-throughput",
+            "2.5Mc/s",
+            "--format",
+            "json",
+        ]
+    )
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "2.5e+06" in output or "2500000" in output
+    assert "hardware_occupancy_hours" in output
+
+
+def test_cli_plan_invalid_throughput() -> None:
+    with pytest.raises(SystemExit):
+        main(["--plan", "--hardware-throughput", "badvalue"])
