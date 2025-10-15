@@ -19,6 +19,15 @@ from .core.trace import (
     MemoryAccessType,
     TraceBundle,
     TraceBuilder,
+    TraceState,
+)
+from .core.analyzer import (
+    MemorySummary,
+    PageAccessStats,
+    RegisterActivity,
+    RegisterEvent,
+    analyze_register_activity,
+    summarize_memory,
 )
 from .core.scheduler import (
     AggregatorWindow,
@@ -51,6 +60,13 @@ __all__ = [
     "MemoryAccessType",
     "TraceBundle",
     "TraceBuilder",
+    "TraceState",
+    "MemorySummary",
+    "PageAccessStats",
+    "RegisterActivity",
+    "RegisterEvent",
+    "analyze_register_activity",
+    "summarize_memory",
     "AggregatorWindow",
     "IdleWindow",
     "ProverSchedule",
